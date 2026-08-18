@@ -137,40 +137,54 @@ offline_install(){
     echo "===> Offline installation process completed!"
 }
 install_offline() {
-    # Path to the package directory relative to the script location
+    # Путь к папке с пакетами relative to the script location
     local pkg_dir="pip_sources/packages"
 
-    # Check if the package directory exists
+    # Проверяем существование директории
     if [ ! -d "$pkg_dir" ]; then
         echo "Error: Directory $pkg_dir not found!" >&2
         return 1
     fi
 
-    # Check if there are any .whl files present
+    # Проверяем наличие .whl файлов (глушим вывод ls)
     if ! ls "$pkg_dir"/*.whl &>/dev/null; then
         echo "Error: No .whl files found in $pkg_dir!" >&2
         return 1
     fi
 
-    # Configure flags for pip based on environment type
+    # Автоматически определяем правильный бинарник pip
+    local pip_bin="pip"
     local pip_flags=""
-    if [ -z "$VIRTUAL_ENV" ]; then
+
+    if [ -d "./env" ]; then
+        # Если в текущей папке есть наше окружение env/, используем его pip напрямую
+        pip_bin="./env/bin/pip"
+        echo "Found local environment. Installing packages into ./env/..."
+    elif [ -n "$VIRTUAL_ENV" ]; then
+        # Если окружение активировано глобально через source
+        pip_bin="pip"
+        echo "Installing into active virtual environment ($VIRTUAL_ENV)..."
+    else
+        # Если ставим в чистую систему
+        pip_bin="pip"
         pip_flags="--break-system-packages"
-        echo "Warning: Installing globally into the system environment..."
+        echo "Warning: No virtual environment found. Installing globally into the system..."
     fi
 
-    echo "Starting offline installation of 100 packages from the local directory..."
+    echo "Starting offline installation of packages from the local directory..."
 
-    # Install all wheels from the specified directory completely offline
-    pip install $pip_flags --no-index --find-links="$pkg_dir" "$pkg_dir"/*.whl
+    # Чистая оффлайн установка: скармливаем файлы напрямую. 
+    # Pip сам разберется с их установкой, так как они перечислены в аргументах.
+    $pip_bin install $pip_flags --no-index "$pkg_dir"/*.whl
 
     if [ $? -eq 0 ]; then
-        echo "Success! All 100 packages have been installed from the local source."
+        echo "Success! All packages have been successfully installed from the local source."
     else
         echo "Error: Failed to install some packages." >&2
         return 1
     fi
 }
+
 
 pip_install(){
     local pip_bin="./env/bin/pip"
