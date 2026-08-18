@@ -1,0 +1,342 @@
+#!/usr/bin/bash
+
+shopt -s expand_aliases
+
+start_git_prj(){
+    local dir="$1"
+    if [[ -z "$dir" ]]; then
+        python3 -m venv ./env
+        git init
+    else
+        python3 -m venv "$dir/env"
+        echo "env/" >> "$dir/.gitignore"
+        (cd "$dir" && git init)
+    fi
+}
+
+start_prj(){
+    local dir="$1"
+    if [[ -z "$dir" ]]; then
+        python3 -m venv ./env
+    else
+        python3 -m venv "$dir/env"
+        echo "env/" >> "$dir/.gitignore"
+    fi
+}
+
+rem_prj(){
+    local dir_for_rm="$1"
+    if [[ -z "$dir_for_rm" ]]; then
+        deactivate &> /dev/null || rm -rf ./env/
+        rm -f ./.gitignore
+    else
+        deactivate &> /dev/null || rm -rf "$dir_for_rm/env/"
+        rm -f "$dir_for_rm/.gitignore"
+    fi
+}
+    
+install(){
+    local pm=""
+    for manager in apt dnf yum pacman zypper apk; do
+        if command -v "$manager" >/dev/null 2>&1; then
+            pm="$manager"
+            break
+        fi
+    done
+
+    echo "Package manager is $pm"
+
+    # Проверяем, есть ли sudo в системе. Если нет — выполняем команды напрямую.
+    local cmd_prefix=""
+    if command -v sudo &> /dev/null; then
+        cmd_prefix="sudo"
+    fi
+
+    echo "Updating package lists..."
+    $cmd_prefix apt update -y
+
+    echo "Installing Python, development tools, and environment packages..."
+    $cmd_prefix apt install -y \
+        build-essential \
+        git \
+        gh \
+        vim \
+        nvim \
+        docker.io \
+        python3 \
+        python3-pip \
+        python3-venv \
+        python3-dev \
+        python3-build \
+        python3-wheel \
+        twine \
+        python3-black \
+        python3-flake8 \
+        python3-mypy \
+        python3-pytest \
+        python3-coverage \
+        python3-isort \
+        python3-poetry \
+        python3-jupyter \
+        python3-django
+
+    echo "All tools have been successfully installed!"
+}
+offline_install(){
+    # Путь к папке со структурами (если скрипт лежит рядом с sources)
+    local src_base="./sources"
+    
+    if [[ ! -d "$src_base" ]]; then
+        echo "Error: Directory '$src_base' not found. Make sure you run this command from the correct path."
+        return 1
+    fi
+
+    # Авто-определение sudo
+    local cmd_prefix=""
+    if command -v sudo &> /dev/null; then
+        cmd_prefix="sudo"
+    fi
+
+    echo "===> Starting Offline Installation..."
+
+    # 1. Установка базовых .deb пакетов из папки sources/deb/
+    if [[ -d "$src_base/deb" ]]; then
+        echo "Installing core .deb packages..."
+        # Накатываем все deb'ы одной командой, чтобы dpkg слинковал их зависимости
+        $cmd_prefix dpkg -i "$src_base"/deb/*.deb
+    else
+        echo "Warning: '$src_base/deb' directory not found, skipping core packages."
+    fi
+
+    # 2. Установка дополнительных инструментов через их локальные install.sh
+    if [[ -d "$src_base/tar.gz" ]]; then
+        echo "Installing advanced tools from tar.gz/ structures..."
+        
+        # Обходим каждую подпапку в sources/tar.gz/
+        for dir in "$src_base/tar.gz"/*; do
+            if [[ -d "$dir" ]]; then
+                local tool_name
+                tool_name=$(basename "$dir")
+                
+                if [[ -f "$dir/install.sh" ]]; then
+                    echo "Running installer for: $tool_name"
+                    (
+                        cd "$dir" || exit 1
+                        # Запускаем локальный install.sh с правами root/sudo
+                        $cmd_prefix bash ./install.sh
+                    )
+                else
+                    echo "Warning: No install.sh found for $tool_name"
+                fi
+            fi
+        done
+    else
+        echo "Warning: '$src_base/tar.gz' directory not found."
+    fi
+
+    echo "===> Offline installation process completed!"
+}
+install_offline() {
+    # Path to the package directory relative to the script location
+    local pkg_dir="pip_sources/packages"
+
+    # Check if the package directory exists
+    if [ ! -d "$pkg_dir" ]; then
+        echo "Error: Directory $pkg_dir not found!" >&2
+        return 1
+    fi
+
+    # Check if there are any .whl files present
+    if ! ls "$pkg_dir"/*.whl &>/dev/null; then
+        echo "Error: No .whl files found in $pkg_dir!" >&2
+        return 1
+    fi
+
+    # Configure flags for pip based on environment type
+    local pip_flags=""
+    if [ -z "$VIRTUAL_ENV" ]; then
+        pip_flags="--break-system-packages"
+        echo "Warning: Installing globally into the system environment..."
+    fi
+
+    echo "Starting offline installation of 100 packages from the local directory..."
+
+    # Install all wheels from the specified directory completely offline
+    pip install $pip_flags --no-index --find-links="$pkg_dir" "$pkg_dir"/*.whl
+
+    if [ $? -eq 0 ]; then
+        echo "Success! All 100 packages have been installed from the local source."
+    else
+        echo "Error: Failed to install some packages." >&2
+        return 1
+    fi
+}
+
+pip_install(){
+    local pip_bin="./env/bin/pip"
+    if [[ ! -f "$pip_bin" ]]; then
+        echo "Error: Virtual environment (env/) not found in the current directory."
+        echo "Please run 'pydk start_prj' first."
+        return 1
+    fi
+
+    echo "Installing pip packages into local environment..."
+    
+    $pip_bin install \
+        "build>=1.0.0" \
+        "wheel>=0.42.0" \
+        "twine>=5.0.0" \
+        "setuptools>=69.0.0" \
+        "check-manifest>=0.50" \
+        "black>=24.0.0" \
+        "isort>=5.13.0" \
+        "flake8>=7.0.0" \
+        "pylint>=3.0.0" \
+        "mypy>=1.8.0" \
+        "flake8-bugbear>=24.0.0" \
+        "flake8-comprehensions>=3.14.0" \
+        "pytest>=8.0.0" \
+        "pytest-cov>=4.1.0" \
+        "pytest-mock>=3.12.0" \
+        "coverage[toml]>=7.4.0" \
+        "types-setuptools>=69.0.0" \
+        "pip-tools>=7.3.0" \
+        "pre-commit>=3.6.0" \
+        "rich>=13.7.0" \
+        "click>=8.1.0" \
+        "pyinstaller" \
+        "pygame" \
+        "pyqt6" \
+        "customtkinter" \
+        "psutil" \
+        "fastapi" \
+        "PyGithub" \
+        "flask" \
+        "pycryptodome"
+
+    echo "All pip packages have been successfully downloaded and installed!"
+}
+
+run(){
+    if [[ -d "./env" ]]; then
+        if [[ -f "main.py" ]]; then
+            ./env/bin/python3 main.py "$@"
+        elif [[ -f "app.py" ]]; then
+            ./env/bin/python3 app.py "$@"
+        elif [[ -f "manage.py" ]]; then
+            ./env/bin/python3 manage.py runserver "$@"
+        else
+            echo "Error: No main.py, app.py or manage.py found!"
+        fi
+    else
+        echo "Error: Virtual environment (env/) not found in this directory."
+    fi
+}
+
+clean(){
+    echo "Cleaning up Python cache files..."
+    find . -type d -name "__pycache__" -exec rm -rf {} +
+    find . -type d -name ".pytest_cache" -exec rm -rf {} +
+    find . -type d -name ".mypy_cache" -exec rm -rf {} +
+    find . -type f -name "*.pyc" -delete
+    rm -rf ./temp/
+    echo "Done!"
+}
+
+build(){
+    local target_dir="${1:-./}"
+    local custom_name="$2"
+    local main_file=""
+
+    echo "Checking target directory: $target_dir"
+
+    if [[ -f "$target_dir/main.py" ]]; then
+        main_file="main.py"
+    elif [[ -f "$target_dir/app.py" ]]; then
+        main_file="app.py"
+    else
+        echo "Error: Cannot find main.py or app.py in '$target_dir' to build."
+        return 1
+    fi
+
+    local py_bin="./env/bin/python3"
+    if [[ -d "$target_dir/env" ]]; then
+        py_bin="$target_dir/env/bin/python3"
+    fi
+
+    if ! $py_bin -m pip show pyinstaller &> /dev/null; then
+        echo "PyInstaller not found. Installing it inside environment..."
+        $py_bin -m pip install pyinstaller
+    fi
+
+    echo "Starting build process for $main_file..."
+    local base_name="${main_file%.py}"
+
+    (
+        cd "$target_dir" || exit 1
+        
+        ./env/bin/pyinstaller --onefile "$main_file"
+        
+        echo "Cleaning up PyInstaller temporary files..."
+        rm -rf "build/"
+        rm -f "${base_name}.spec"
+        
+        if [[ -f ".gitignore" ]]; then
+            if ! grep -q "^dist/" .gitignore; then
+                echo "dist/" >> .gitignore
+                echo "Added 'dist/' to .gitignore"
+            fi
+        fi
+
+        local final_output="$base_name"
+        if [[ -n "$custom_name" ]]; then
+            if [[ -f "dist/$base_name" ]]; then
+                mv "dist/$base_name" "dist/$custom_name"
+                final_output="$custom_name"
+                echo "Successfully renamed output to: dist/$custom_name"
+            fi
+        fi
+
+        if [[ -f "dist/$final_output" ]]; then
+            chmod +x "dist/$final_output"
+            echo "Execution permissions successfully granted to: dist/$final_output"
+        fi
+    )
+    echo "Build completed! Final executable located in '$target_dir/dist/'"
+}
+get_pm(){
+    for pm in apt dnf yum pacman zypper apk; do
+        if command -v "$pm" >/dev/null 2>&1; then
+            echo -e "Package manager is $pm"
+            break
+        fi
+    done
+}
+show_help(){
+    echo "PyDK - Python Developer Kit"
+    echo "Usage: pydk [command] [arguments]"
+    echo ""
+    echo "Commands:"
+    echo "  start_prj     - Create a standard virtual environment (env/) in the target directory"
+    echo "  start_git_prj - Create an environment, add .gitignore, and initialize Git"
+    echo "  rem_prj       - Safely deactivate environment and remove env/ with .gitignore"
+    echo "  run           - Automatically detect and run main.py, app.py, or Django server"
+    echo "  clean         - Clear all __pycache__, pytest, mypy temporary cache files and temp/ directory"
+    echo "  build         - Compile Python app into a standalone binary executable using PyInstaller"
+    echo "  install       - Full automated system installation of Python dev stack via apt"
+    echo "  pip_install   - Install a complete set of core dev, test, and GUI libraries into env/"
+}
+
+cmd="$1"
+
+if [[ -z "$cmd" || "$cmd" == "help" || "$cmd" == "-h" || "$cmd" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
+if [[ "$(type -t "$cmd")" == "function" ]]; then
+    "$@"
+else
+    show_help
+    exit 1
+fi
