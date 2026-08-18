@@ -84,7 +84,9 @@ install(){
 }
 offline_install(){
     # Путь к папке со структурами (если скрипт лежит рядом с sources)
-    local src_base="./sources"
+    # Находит папку sources там же, где лежит сам исполняемый файл pydk
+    local src_base="$(dirname "$(readlink -f "$0")")/sources"
+
     
     if [[ ! -d "$src_base" ]]; then
         echo "Error: Directory '$src_base' not found. Make sure you run this command from the correct path."
@@ -138,7 +140,9 @@ offline_install(){
 }
 install_offline() {
     # Путь к папке с пакетами relative to the script location
-    local pkg_dir="pip_sources/packages"
+    # Находит pip_sources там же, где лежит сам исполняемый файл pydk
+    local pkg_dir="$(dirname "$(readlink -f "$0")")/pip_sources/packages"
+
 
     # Проверяем существование директории
     if [ ! -d "$pkg_dir" ]; then
@@ -181,6 +185,51 @@ install_offline() {
         echo "Success! All packages have been successfully installed from the local source."
     else
         echo "Error: Failed to install some packages." >&2
+        return 1
+    fi
+}
+update(){
+    # Определяем реальное местоположение папки /opt/pydk
+    local install_dir
+    install_dir="$(dirname "$(readlink -f "$0")")"
+
+    echo "Checking for PyDK updates on GitHub..."
+
+    # Проверяем, инициализирован ли Git-репозиторий в папке установки
+    if [ ! -d "$install_dir/.git" ]; then
+        echo "Error: /opt/pydk is not a valid Git repository."
+        echo "Cannot update via Git. Re-run install.sh if needed."
+        return 1
+    fi
+
+    # Авто-определение sudo для перезаписи файлов в /opt
+    local cmd_prefix=""
+    if [ ! -w "$install_dir" ]; then
+        if command -v sudo &> /dev/null; then
+            cmd_prefix="sudo"
+            echo "[INFO] Root privileges required to update files in /opt. Using sudo..."
+        else
+            echo "Error: No write permissions for $install_dir and 'sudo' is not installed."
+            return 1
+        fi
+    fi
+
+    echo "Fetching latest version from GitHub..."
+    (
+        cd "$install_dir" || exit 1
+        
+        # Сбрасываем локальные изменения (на случай, если кеш забил файлы)
+        $cmd_prefix git fetch --all
+        $cmd_prefix git reset --hard origin/main
+        
+        # На всякий случай обновляем права на запуск главного файла
+        $cmd_prefix chmod +x pydk
+    )
+
+    if [ $? -eq 0 ]; then
+        echo "Success! PyDK has been updated to the latest version."
+    else
+        echo "Error: Update failed. Check your internet connection." >&2
         return 1
     fi
 }
@@ -339,6 +388,8 @@ show_help(){
     echo "  build         - Compile Python app into a standalone binary executable using PyInstaller"
     echo "  install       - Full automated system installation of Python dev stack via apt"
     echo "  pip_install   - Install a complete set of core dev, test, and GUI libraries into env/"
+    echo "  update        - Fetch and apply the latest changes from the GitHub repository"
+
 }
 
 cmd="$1"
